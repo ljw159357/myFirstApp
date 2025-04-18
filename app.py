@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
 # 加载模型
-model = joblib.load('pt_st/demo/rf.pkl')
+model = joblib.load('rf.pkl')
 scaler = StandardScaler()
 
 # 特征定义
