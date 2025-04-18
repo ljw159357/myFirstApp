@@ -69,7 +69,7 @@ if st.button("Predict"):
     probability = predicted_proba[predicted_class] * 100
 
     # 显示预测结果
-    text = f"Based on feature values, predicted possibility of AKI is {probability:.2f}%"
+    text = f"Based on feature values, predicted possibility of Thrombosis After Lung Transplantation is {probability:.2f}%"
     fig, ax = plt.subplots(figsize=(8, 1))
     ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
     ax.axis('off')
