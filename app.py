@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 import streamlit as st
 import joblib
 import numpy as np
@@ -11,42 +8,37 @@ from sklearn.preprocessing import StandardScaler
 
 # 特征的缩写字典
 feature_abbr = {
-    "Postoperative Platelet Count (x10⁹/L)": "post_plt",
-    "Urgent Postoperative APTT (s)": "post_APTT_u",
-    "Day 1 Postoperative APTT (s)": "post_APTT_1",
-    "Day 1 Postoperative Antithrombin III Activity (%)": "post_antithrombin_III_1",
+    "Age": "age",
+    "Postoperative platelet count (x10⁹/L)": "post_plt",
+    "Postoperative BUN (μmol/L)": "post_BUN",
+    "Day 1 postoperative antithrombin III activity (%)": "post_antithrombin_III_1",
+    "NYHA": "NYHA",
+    "HBP": "HBP",
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": "post_CRRT",
-    "Postoperative Anticoagulation": "post_anticoagulation",
-    "Transplant Side": "trans_side",
-    "Primary Graft Dysfunction (PGD, Level)": "PGD",
-    "Height": "height",  # 其他特征也可以添加缩写
-    "HBP": "hbp"
+    "Postoperative Anticoagulation": "post_anticoagulation"
 }
 
 # 加载模型
-model = joblib.load('xgb.pkl')
+model = joblib.load('rf.pkl')
 scaler = StandardScaler()
 
 # 特征定义
 feature_ranges = {
-    "Height": {"type": "numerical"},
+    "Age": {"type": "numerical"},
+    "Postoperative platelet count (x10⁹/L)": {"type": "numerical"},
+    "Postoperative BUN (μmol/L)": {"type": "numerical"},
+    "Day 1 postoperative antithrombin III activity (%)": {"type": "numerical"},
+    "NYHA": {"type": "categorical", "options": ["＞2", "≤2"]},
     "HBP": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative Platelet Count (x10⁹/L)": {"type": "numerical"},
-    "Urgent Postoperative APTT (s)": {"type": "numerical"},
-    "Day 1 Postoperative APTT (s)": {"type": "numerical"},
-    "Day 1 Postoperative Antithrombin III Activity (%)": {"type": "numerical"},
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative Anticoagulation": {"type": "categorical", "options": ["Yes", "No"]},
-    "Transplant Side": {"type": "categorical", "options": ["Left", "Right", "Both"]},
-    "Primary Graft Dysfunction (PGD, Level)": {"type": "categorical", "options": ["3", "2", "1", "0"]},
+    "Postoperative Anticoagulation": {"type": "categorical", "options": ["Yes", "No"]}
 }
 
 category_to_numeric_mapping = {
-    "Transplant Side": {"Left": 1, "Right": 2, "Both": 0},
+    "NYHA": {"＞2": 1, "≤2": 0},
     "HBP": {"Yes": 1, "No": 0},
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"Yes": 1, "No": 0},
-    "Postoperative Anticoagulation": {"Yes": 1, "No": 0},
-    "Primary Graft Dysfunction (PGD, Level)": {"3": 3, "2": 2, "1": 1, "0": 0}
+    "Postoperative Anticoagulation": {"Yes": 1, "No": 0}
 }
 
 # UI
@@ -78,14 +70,16 @@ if numerical_values:
 
 features = np.array([feature_values])
 
-# 预测
+# 特征名缩写
+feature_keys_abbr = [feature_abbr.get(f, f) for f in feature_keys]  # 将特征名替换为缩写
+
 if st.button("Predict"):
     predicted_class = model.predict(features)[0]
     predicted_proba = model.predict_proba(features)[0]
     probability = predicted_proba[predicted_class] * 100
 
     # 显示预测结果
-    text = f"Based on feature values, predicted possibility of hemorrhage after lung transplantation is {probability:.2f}%"
+    text = f"Based on feature values, predicted possibility of thrombosis after lung transplantation is {probability:.2f}%"
     fig, ax = plt.subplots(figsize=(8, 1))
     ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
     ax.axis('off')
@@ -102,31 +96,15 @@ if st.button("Predict"):
 
     tree_model = get_tree_model(model)
     explainer = shap.TreeExplainer(tree_model)
-    
-    
     shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_keys))
-    
-    if isinstance(shap_values, list) and len(shap_values) > 1:
-        shap_values_for_display = shap_values[1]  
-        base_value = explainer.expected_value[1]
-    elif isinstance(shap_values, list) and len(shap_values) == 1:
-        shap_values_for_display = shap_values[0]
-        base_value = explainer.expected_value[0]
-    else:
-        shap_values_for_display = shap_values
-        base_value = explainer.expected_value
 
-    # 将特征名替换为缩写
-    feature_keys_abbr = [feature_abbr.get(f, f) for f in feature_keys]  # 将特征名替换为缩写
-
-    # 生成 SHAP 力图
     shap.initjs()
     shap_fig = shap.plots.force(
-        base_value,  # 基准值
-        shap_values_for_display,  # SHAP 值
+        explainer.expected_value[1],  # 类别 1 的基准值
+        shap_values[0, :, 1],  # 类别 1 的 SHAP 值
         pd.DataFrame([feature_values], columns=feature_keys_abbr),  # 使用缩写作为列名
         matplotlib=True,
         show=False  # 不自动显示图形
     )
-    
+
     st.pyplot(shap_fig)
