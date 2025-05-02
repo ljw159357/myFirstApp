@@ -73,41 +73,38 @@ features = np.array([feature_values])
 # 特征名缩写
 feature_keys_abbr = [feature_abbr.get(f, f) for f in feature_keys]  # 将特征名替换为缩写
 
-# 预测与 SHAP 可视化
 if st.button("Predict"):
-    # 模型预测
     predicted_class = model.predict(features)[0]
     predicted_proba = model.predict_proba(features)[0]
-
-    # 提取预测的类别概率
     probability = predicted_proba[predicted_class] * 100
 
-    # 显示预测结果，使用 Matplotlib 渲染指定字体
-    text = f"Based on feature values, predicted possibility of AKI is {probability:.2f}%"
+    # 显示预测结果
+    text = f"Based on feature values, predicted possibility of thrombosis after lung transplantation is {probability:.2f}%"
     fig, ax = plt.subplots(figsize=(8, 1))
-    ax.text(
-        0.5, 0.5, text,
-        fontsize=16,
-        ha='center', va='center',
-        fontname='Times New Roman',
-        transform=ax.transAxes
-    )
+    ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
     ax.axis('off')
     plt.savefig("prediction_text.png", bbox_inches='tight', dpi=300)
     st.image("prediction_text.png")
 
-    # 计算 SHAP 值
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_ranges.keys()))
+    # SHAP 解释
+    # 提取底层模型（支持 pipeline 或直接模型）
+    def get_tree_model(model):
+        from sklearn.pipeline import Pipeline
+        if isinstance(model, Pipeline):
+            return model.named_steps['clf']
+        return model
 
-    # 生成 SHAP 力图
-    class_index = predicted_class  # 当前预测类别
-    shap_fig = shap.force_plot(
-        explainer.expected_value[class_index],
-        shap_values[:,:,class_index],
-        pd.DataFrame([feature_values], columns=feature_ranges.keys()),
+    tree_model = get_tree_model(model)
+    explainer = shap.TreeExplainer(tree_model)
+    shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_keys))
+
+    shap.initjs()
+    shap_fig = shap.plots.force(
+        explainer.expected_value[1],  # 类别 1 的基准值
+        shap_values[0, :, 1],  # 类别 1 的 SHAP 值
+        pd.DataFrame([feature_values], columns=feature_keys_abbr),  # 使用缩写作为列名
         matplotlib=True,
+        show=False  # 不自动显示图形
     )
-    # 保存并显示 SHAP 图
-    plt.savefig("shap_force_plot.png", bbox_inches='tight', dpi=1200)
-    st.image("shap_force_plot.png")
+
+    st.pyplot(shap_fig)
