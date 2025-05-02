@@ -7,7 +7,12 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
 # 加载模型
-model = joblib.load('rf.pkl')
+try:
+    model = joblib.load('rf.pkl')  # 确保文件名正确
+except FileNotFoundError:
+    st.error("模型文件 'rf.pkl' 没有找到，请检查文件路径。")
+    st.stop()
+
 scaler = StandardScaler()
 
 # 特征定义
@@ -66,7 +71,7 @@ if st.button("Predict"):
     # 显示预测结果
     text = f"Based on feature values, predicted possibility of thrombosis after lung transplantation is {probability:.2f}%"
     fig, ax = plt.subplots(figsize=(8, 1))
-    ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
+    ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Arial', transform=ax.transAxes)  # 改为已安装的字体
     ax.axis('off')
     plt.savefig("prediction_text.png", bbox_inches='tight', dpi=300)
     st.image("prediction_text.png")
@@ -81,7 +86,6 @@ if st.button("Predict"):
 
     tree_model = get_tree_model(model)
     explainer = shap.TreeExplainer(tree_model)
-    # explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_keys))
 
     shap.initjs()
@@ -89,19 +93,7 @@ if st.button("Predict"):
         explainer.expected_value[1],  # 类别 1 的基准值
         shap_values[0, :, 1],  # 类别 1 的 SHAP 值
         pd.DataFrame([feature_values], columns=feature_keys),
-        # feature_names=features_adult_en,  # 特征名称
         matplotlib=True,
         show=False  # 不自动显示图形
     )
-    # shap_fig = shap.plots.force(
-    #     # explainer.expected_value[predicted_class],
-    #     # shap_values[predicted_class],
-    #     expected_value,
-    #     shap_values_for_display,
-    #     pd.DataFrame([feature_values], columns=feature_keys),
-    #     matplotlib=True
-    # )
     st.pyplot(shap_fig)
-    # st_shap_html = f"<head>{shap.getjs()}</head><body>{shap.save_html(None, shap_fig, return_html=True)}</body>"
-    # st.components.v1.html(st_shap_html, height=300)
-
