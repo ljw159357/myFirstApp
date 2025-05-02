@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import streamlit as st
 import joblib
 import numpy as np
@@ -12,34 +6,27 @@ import shap
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
-
-# In[2]:
-
-
 # 加载模型
-model = joblib.load('xgb.pkl')
+model = joblib.load('rf.pkl')
 scaler = StandardScaler()
 
 # 特征定义
 feature_ranges = {
-    "Height": {"type": "numerical"},
+    "Age": {"type": "numerical"},
+    "Postoperative platelet count (x10⁹/L)": {"type": "numerical"},
+    "Postoperative BUN (μmol/L)": {"type": "numerical"},
+    "Day 1 postoperative antithrombin III activity (%)": {"type": "numerical"},
+    "NYHA": {"type": "categorical", "options": ["＞2", "≤2"]},
     "HBP": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative Platelet Count (x10⁹/L)": {"type": "numerical"},
-    "Urgent Postoperative APTT (s)": {"type": "numerical"},
-    "Day 1 Postoperative APTT (s)": {"type": "numerical"},
-    "Day 1 Postoperative Antithrombin III Activity (%)": {"type": "numerical"},
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative Anticoagulation": {"type": "categorical", "options": ["Yes", "No"]},
-    "Transplant Side": {"type": "categorical", "options": ["Left", "Right", "Both"]},
-    "Primary Graft Dysfunction (PGD, Level)": {"type": "categorical", "options": ["3", "2", "1", "0"]},
+    "Postoperative Anticoagulation": {"type": "categorical", "options": ["Yes", "No"]}
 }
 
 category_to_numeric_mapping = {
-    "Transplant Side": {"Left": 1, "Right": 2, "Both": 0},
+    "NYHA": {"＞2": 1, "≤2": 0},
     "HBP": {"Yes": 1, "No": 0},
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"Yes": 1, "No": 0},
-    "Postoperative Anticoagulation": {"Yes": 1, "No": 0},
-    "Primary Graft Dysfunction (PGD, Level)": {"3": 3, "2": 2, "1": 1, "0": 0}
+    "Postoperative Anticoagulation": {"Yes": 1, "No": 0}
 }
 
 # UI
@@ -71,17 +58,13 @@ if numerical_values:
 
 features = np.array([feature_values])
 
-
-# In[3]:
-
-
 if st.button("Predict"):
     predicted_class = model.predict(features)[0]
     predicted_proba = model.predict_proba(features)[0]
     probability = predicted_proba[predicted_class] * 100
 
     # 显示预测结果
-    text = f"Based on feature values, predicted possibility of hemorrhage after lung transplantation is {probability:.2f}%"
+    text = f"Based on feature values, predicted possibility of thrombosis after lung transplantation is {probability:.2f}%"
     fig, ax = plt.subplots(figsize=(8, 1))
     ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
     ax.axis('off')
@@ -122,5 +105,3 @@ if st.button("Predict"):
     # st_shap_html = f"<head>{shap.getjs()}</head><body>{shap.save_html(None, shap_fig, return_html=True)}</body>"
     # st.components.v1.html(st_shap_html, height=300)
 
-
-# In[ ]:
