@@ -6,13 +6,20 @@ import shap
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 
-# 加载模型
-try:
-    model = joblib.load('rf.pkl')  # 确保文件名正确
-except FileNotFoundError:
-    st.error("模型文件 'rf.pkl' 没有找到，请检查文件路径。")
-    st.stop()
+# 特征的缩写字典
+feature_abbr = {
+    "Age": "age",
+    "Postoperative platelet count (x10⁹/L)": "post_plt",
+    "Postoperative BUN (μmol/L)": "post_BUN",
+    "Day 1 postoperative antithrombin III activity (%)": "post_antithrombin_III_1",
+    "NYHA": "NYHA",
+    "HBP": "HBP",
+    "Postoperative CRRT (Continuous Renal Replacement Therapy)": "post_CRRT",
+    "Postoperative Anticoagulation": "post_anticoagulation"
+}
 
+# 加载模型
+model = joblib.load('rf.pkl')
 scaler = StandardScaler()
 
 # 特征定义
@@ -63,6 +70,9 @@ if numerical_values:
 
 features = np.array([feature_values])
 
+# 特征名缩写
+feature_keys_abbr = [feature_abbr.get(f, f) for f in feature_keys]  # 将特征名替换为缩写
+
 if st.button("Predict"):
     predicted_class = model.predict(features)[0]
     predicted_proba = model.predict_proba(features)[0]
@@ -71,7 +81,7 @@ if st.button("Predict"):
     # 显示预测结果
     text = f"Based on feature values, predicted possibility of thrombosis after lung transplantation is {probability:.2f}%"
     fig, ax = plt.subplots(figsize=(8, 1))
-    ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Arial', transform=ax.transAxes)  # 改为已安装的字体
+    ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
     ax.axis('off')
     plt.savefig("prediction_text.png", bbox_inches='tight', dpi=300)
     st.image("prediction_text.png")
@@ -92,8 +102,9 @@ if st.button("Predict"):
     shap_fig = shap.plots.force(
         explainer.expected_value[1],  # 类别 1 的基准值
         shap_values[0, :, 1],  # 类别 1 的 SHAP 值
-        pd.DataFrame([feature_values], columns=feature_keys),
+        pd.DataFrame([feature_values], columns=feature_keys_abbr),  # 使用缩写作为列名
         matplotlib=True,
         show=False  # 不自动显示图形
     )
+
     st.pyplot(shap_fig)
