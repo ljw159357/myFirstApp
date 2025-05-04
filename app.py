@@ -42,8 +42,8 @@ category_to_numeric_mapping = {
 }
 
 # UI
-st.title("Prediction Model for Thrombosis After Lung Transplantation")
-st.header("Enter the following feature values:")
+st.header("Prediction Model for Thrombosis After Lung Transplantation")
+st.write("Enter the following feature values:")
 
 feature_values = []
 feature_keys = list(feature_ranges.keys())
@@ -77,4 +77,4 @@ if st.button("Predict"):
     prediction = model.predict(features)[0]
     Predict_proba = model.predict_proba(features)[:, 1][0]
     # 输出概率
-    st.subheader(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
+    st.write(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
