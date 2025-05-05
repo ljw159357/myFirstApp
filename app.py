@@ -88,7 +88,7 @@ if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
-# Inference & SHAP explanation (Probability scale)
+# Inference & SHAP explanation (Waterfall + Force)
 # ---------------------------------------------
 if st.button("Predict"):
     # ---------------- Prediction ----------------
@@ -98,12 +98,11 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Return SHAP explainer that outputs **probabilities** instead of logits."""
         try:
-            return shap.Explainer(_m, model_output="probability")
+            return shap.Explainer(_m)
         except Exception:
             if isinstance(_m, Pipeline):
-                return shap.TreeExplainer(_m.steps[-1][1], model_output="probability")
+                return shap.TreeExplainer(_m.steps[-1][1])
             raise
 
     explainer = build_explainer(model)
@@ -114,12 +113,12 @@ if st.button("Predict"):
     # ---------------- Select single‑output explanation ----------------
     instance_exp = shap_exp[0]
     if instance_exp.values.ndim == 2:  # (n_features, n_outputs)
-        instance_exp = instance_exp[:, 1]  # positive class
+        instance_exp = instance_exp[:, 1]  # choose positive class by default
 
     # ====================================================
-    # WATERFALL PLOT – probability scale
+    # WATERFALL PLOT
     # ====================================================
-    st.subheader("Model Explanation – SHAP Waterfall (Probability)")
+    st.subheader("Model Explanation – SHAP Waterfall Plot")
     shap.plots.waterfall(instance_exp, max_display=15, show=False)
     fig_water = plt.gcf()
     st.pyplot(fig_water)
@@ -133,12 +132,13 @@ if st.button("Predict"):
         )
 
     # ====================================================
-    # FORCE PLOT – probability scale
+    # FORCE PLOT (static matplotlib)
     # ====================================================
-    st.subheader("Model Explanation – SHAP Force (Probability)")
-    base_val = float(instance_exp.base_values)
-    shap_vec = instance_exp.values
-    feature_vals = instance_exp.data
+    st.subheader("Model Explanation – SHAP Force Plot")
+
+    base_val = float(instance_exp.base_values if hasattr(instance_exp.base_values, "__len__") else instance_exp.base_values)
+    shap_vec = instance_exp.values  # 1‑D contributions
+    feature_vals = instance_exp.data  # original feature values
     feature_names = instance_exp.feature_names
 
     shap.plots.force(
