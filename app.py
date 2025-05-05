@@ -98,12 +98,25 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Return SHAP explainer that outputs **probabilities** instead of logits."""
+        """Return SHAP explainer on **probability** scale.
+        For tree models the default `tree_path_dependent` perturbation only
+        supports `model_output="raw"`; therefore we explicitly switch to
+        `feature_perturbation="interventional"` which is compatible with
+        probability outputs (though slightly slower).
+        """
         try:
-            return shap.Explainer(_m, model_output="probability")
+            return shap.Explainer(
+                _m,
+                model_output="probability",
+                feature_perturbation="interventional",
+            )
         except Exception:
             if isinstance(_m, Pipeline):
-                return shap.TreeExplainer(_m.steps[-1][1], model_output="probability")
+                return shap.TreeExplainer(
+                    _m.steps[-1][1],
+                    model_output="probability",
+                    feature_perturbation="interventional",
+                )
             raise
 
     explainer = build_explainer(model)
