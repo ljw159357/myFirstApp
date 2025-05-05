@@ -50,74 +50,29 @@ def _fig_to_png_bytes(fig):
 # Load model & (optional) external scaler
 # ---------------------------------------------
 @st.cache_resource(show_spinner=False)
-def load_assets():
-    """Load the trained model and optional scaler from disk."""
-    model_ = joblib.load("rf.pkl")
-
-    scaler_ = None
-    if not isinstance(model_, Pipeline):
-        try:
-            scaler_ = joblib.load("minmax_scaler.pkl")
-        except FileNotFoundError:
-            pass
-    return model_, scaler_
-
-model, external_scaler = load_assets()
-uses_pipeline = isinstance(model, Pipeline)
-
-# ---------------------------------------------
-# UI – feature input
-# ---------------------------------------------
-st.title("Prediction Model for Thrombosis After Lung Transplantation")
-
-user_inputs = {}
-for feat, (ftype, default) in feature_defs.items():
-    if ftype == "numerical":
-        user_inputs[feat] = st.number_input(feat, value=float(default))
-    else:
-        user_inputs[feat] = st.selectbox(feat, feature_defs[feat][1], index=0)
-
-user_df_raw = pd.DataFrame([user_inputs])
-
-# ---------------------------------------------
-# Pre‑processing (mirror training pipeline)
-# ---------------------------------------------
-user_df_proc = user_df_raw.copy()
-user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
-if (external_scaler is not None) and (not uses_pipeline):
-    user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
-
-# ---------------------------------------------
-# Inference & SHAP explanation (Probability scale)
-# ---------------------------------------------
-if st.button("Predict"):
-    # ---------------- Prediction ----------------
-    proba = model.predict_proba(user_df_proc)[:, 1][0]
-    st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
-
-    # ---------------- Build SHAP explainer ----------------
-    @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Return SHAP explainer on **probability** scale.
-        For tree models the default `tree_path_dependent` perturbation only
-        supports `model_output="raw"`; therefore we explicitly switch to
-        `feature_perturbation="interventional"` which is compatible with
-        probability outputs (though slightly slower).
+        """Return a SHAP *TreeExplainer* forced to probability scale.
+
+        * Why not `shap.Explainer`?
+          In SHAP ≤0.47 当传入 `Pipeline` + `model_output="probability"` 时，
+          `Explainer` 会内部调用 `TreeExplainer`，但 **忽略我们指定的
+          `feature_perturbation`**，退回默认 `tree_path_dependent` → 与概率
+          输出冲突，从而报 *Only model_output="raw" is supported...*。
+
+        * 解决策略：
+          - 拆出 Pipeline 的末级树模型（RandomForestClassifier）。
+          - 直接构造 `TreeExplainer`，同时显式设置
+            `feature_perturbation="interventional"` 与
+            `model_output="probability"`，二者兼容。
         """
-        try:
-            return shap.Explainer(
-                _m,
-                model_output="probability",
-                feature_perturbation="interventional",
-            )
-        except Exception:
-            if isinstance(_m, Pipeline):
-                return shap.TreeExplainer(
-                    _m.steps[-1][1],
-                    model_output="probability",
-                    feature_perturbation="interventional",
-                )
-            raise
+        # 拆出底层树模型（假设在步骤末尾）
+        base_est = _m.steps[-1][1] if isinstance(_m, Pipeline) else _m
+
+        return shap.TreeExplainer(
+            base_est,
+            model_output="probability",
+            feature_perturbation="interventional",
+        )
 
     explainer = build_explainer(model)
 
