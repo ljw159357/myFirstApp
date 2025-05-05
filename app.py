@@ -110,19 +110,40 @@ if st.button("Predict"):
     # ---------------- Compute SHAP values safely ----------------
     shap_values = explainer.shap_values(user_df_proc)
 
-    # ---- Robustly pick positive‑class vector & expected value ----
+        # ---- Robustly pick positive‑class vector & expected value ----
     if isinstance(shap_values, list):
-        # Binary case: list length == 2, but fallback if single
+        # TreeExplainer returns list in raw‑output mode — we requested probability, but stay safe
         pos_index = 1 if len(shap_values) > 1 else 0
-        shap_vec = shap_values[pos_index][0]
+        shap_vec = shap_values[pos_index][0]  # (n_features,)
         base_val = explainer.expected_value[pos_index] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
     else:
-        # Already ndarray shape (n_samples, n_features)
-        shap_vec = shap_values[0]
-        base_val = explainer.expected_value
+        # ndarray shape can be (n_samples, n_features) OR (n_samples, n_features, n_outputs)
+        arr = shap_values[0]
+        if arr.ndim == 2 and arr.shape[1] == 2:
+            # shape (n_features, 2) → choose positive class (index 1)
+            shap_vec = arr[:, 1]
+        elif arr.ndim == 3:
+            # shape (n_features, n_outputs, something) uncommon, pick [:,1]
+            shap_vec = arr[:, 1, ...].squeeze()
+        else:
+            shap_vec = arr  # already 1‑D
+
+        base_val_raw = explainer.expected_value
+        if isinstance(base_val_raw, (list, np.ndarray)) and len(base_val_raw) > 1:
+            base_val = base_val_raw[1]  # positive class
+        else:
+            base_val = base_val_raw
+
+    # Ensure we ended with a 1‑D contribution vector
+    shap_vec = np.asarray(shap_vec).flatten()
 
     # Wrap into Explanation
     instance_exp = shap.Explanation(
+        values=shap_vec,
+        base_values=base_val,
+        data=user_df_proc.iloc[0].values,
+        feature_names=user_df_proc.columns,
+    )(
         values=shap_vec,
         base_values=base_val,
         data=user_df_proc.iloc[0].values,
