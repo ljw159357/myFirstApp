@@ -89,13 +89,14 @@ if st.button("Predict"):
         base_val = explainer.expected_value[1] if hasattr(explainer, "expected_value") and isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
 
     # -------- 绘制 SHAP 力图 (matplotlib) --------
-    plt.clf()
-    # SHAP 0.20+ 要求: base_value 第 1 位, shap_vals 第 2 位, 其余关键字
-    shap.force_plot(
-        base_val,
-        shap_vec,
-        features=user_df_raw,
-        matplotlib=True,
-        show=False,
-    )
-    st.pyplot(bbox_inches="tight")
+    try:
+        force_fig = shap.plots.force(
+            base_val,
+            shap_vec,
+            features=user_df_raw.iloc[0],  # 单样本特征 Series
+            matplotlib=True,
+            show=False,
+        )
+        st.pyplot(force_fig)
+    except Exception as e:
+        st.error(f"SHAP force plot failed: {e}")
