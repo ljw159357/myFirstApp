@@ -146,6 +146,7 @@ if st.button("Predict"):
         shap_vec,
         features=feature_vals,
         feature_names=feature_names,
+        link="logit",
         matplotlib=True,
         show=False,
     )
