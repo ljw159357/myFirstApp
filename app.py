@@ -96,13 +96,17 @@ if st.button("Predict"):
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
     # ---------------- Build SHAP explainer ----------------
+    # NOTE: `_m` starts with underscore so Streamlit ignores it when hashing
     @st.cache_resource(show_spinner=False)
-    def build_explainer(m):
+    def build_explainer(_m):
+        """Return a SHAP explainer that works for both pipelines and bare models.
+        The leading underscore prevents Streamlit from trying to hash the model object.
+        """
         try:
-            return shap.Explainer(m)
+            return shap.Explainer(_m)
         except Exception:
-            if isinstance(m, Pipeline):
-                return shap.TreeExplainer(m.steps[-1][1])
+            if isinstance(_m, Pipeline):
+                return shap.TreeExplainer(_m.steps[-1][1])
             raise
 
     explainer = build_explainer(model)
