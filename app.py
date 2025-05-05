@@ -63,9 +63,16 @@ for feat, (ftype, default) in feature_defs.items():
 user_df_raw = pd.DataFrame([user_inputs])
 
 # ---------------------------------------------
+# ---------------------------------------------
 # Pre‑processing -------------------------------------------------------------
-# 如果模型本身就是 Pipeline，则交给 Pipeline 处理；
-# 否则先做映射+外部 scaler.transform。
+# 1. 将所有分类特征先映射为数字，保证 DataFrame 无字符串；
+# 2. 如果模型不是 Pipeline，则对数值列做外部 scaler.transform；
+# ---------------------------------------------------------------------------
+user_df_proc = user_df_raw.copy()
+user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
+
+if not uses_pipeline:
+    user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 # ---------------------------------------------------------------------------
 if uses_pipeline:
     user_df_proc = user_df_raw.copy()
