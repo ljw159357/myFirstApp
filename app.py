@@ -96,15 +96,24 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Build explainer **on probability scale** for consistent outputs.
-        UPDATED: added `model_output='probability'` so f(x) = predicted probability.
-        """  # <<< UPDATED TO PROBABILITY SCALE
+        """Build explainer on **probability** scale.
+        For tree models this requires `feature_perturbation='interventional'`.
+        """  # <<< UPDATED TO FIX ValueError
         try:
-            return shap.Explainer(_m, model_output="probability")  # <<< CHANGED
+            # Use generic wrapper first — pass extra arg for trees
+            return shap.Explainer(
+                _m,
+                model_output="probability",               # <<< CHANGED
+                feature_perturbation="interventional",    # <<< ADDED
+            )
         except Exception:
-            if isinstance(_m, Pipeline):
-                return shap.TreeExplainer(_m.steps[-1][1], model_output="probability")  # <<< CHANGED
-            raise
+            # Fallback: explicitly build TreeExplainer on the final estimator
+            base_est = _m.steps[-1][1] if isinstance(_m, Pipeline) else _m
+            return shap.TreeExplainer(
+                base_est,
+                model_output="probability",               # <<< CHANGED
+                feature_perturbation="interventional",    # <<< ADDED
+            )
 
     explainer = build_explainer(model)
 
