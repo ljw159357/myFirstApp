@@ -88,7 +88,7 @@ if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
-# Inference & SHAP explanation (Waterfall)
+# Inference & SHAP explanation (Waterfall + Force)
 # ---------------------------------------------
 if st.button("Predict"):
     # ---------------- Prediction ----------------
@@ -110,28 +110,52 @@ if st.button("Predict"):
     # ---------------- Compute SHAP values ----------------
     shap_exp = explainer(user_df_proc)
 
-    # ---------------- Waterfall plot ----------------
-    st.subheader("Model Explanation (SHAP Waterfall Plot)")
-
-    # Handle multi-output (e.g., binary class probs) -> pick positive‑class (index 1) contributions
+    # ---------------- Select single‑output explanation ----------------
     instance_exp = shap_exp[0]
-    if instance_exp.values.ndim == 2:  # shape (n_features, n_outputs)
-        # Choose class 1 (thrombosis) by default; adjust if needed
-        instance_exp = instance_exp[:, 1]
+    if instance_exp.values.ndim == 2:  # (n_features, n_outputs)
+        instance_exp = instance_exp[:, 1]  # choose positive class by default
 
-    shap.plots.waterfall(
-        instance_exp,
-        max_display=15,
-        show=False,
-    )
-    fig = plt.gcf()
-    st.pyplot(fig)
+    # ====================================================
+    # WATERFALL PLOT
+    # ====================================================
+    st.subheader("Model Explanation – SHAP Waterfall Plot")
+    shap.plots.waterfall(instance_exp, max_display=15, show=False)
+    fig_water = plt.gcf()
+    st.pyplot(fig_water)
 
-    # ---------------- Download figure ----------------
     with st.expander("Download SHAP waterfall plot"):
         st.download_button(
             label="Download PNG",
-            data=_fig_to_png_bytes(fig),
+            data=_fig_to_png_bytes(fig_water),
             file_name="shap_waterfall_plot.png",
+            mime="image/png",
+        )
+
+    # ====================================================
+    # FORCE PLOT (static matplotlib)
+    # ====================================================
+    st.subheader("Model Explanation – SHAP Force Plot")
+
+    base_val = float(instance_exp.base_values if hasattr(instance_exp.base_values, "__len__") else instance_exp.base_values)
+    shap_vec = instance_exp.values  # 1‑D contributions
+    feature_vals = instance_exp.data  # original feature values
+    feature_names = instance_exp.feature_names
+
+    shap.plots.force(
+        base_val,
+        shap_vec,
+        features=feature_vals,
+        feature_names=feature_names,
+        matplotlib=True,
+        show=False,
+    )
+    fig_force = plt.gcf()
+    st.pyplot(fig_force)
+
+    with st.expander("Download SHAP force plot"):
+        st.download_button(
+            label="Download PNG",
+            data=_fig_to_png_bytes(fig_force),
+            file_name="shap_force_plot.png",
             mime="image/png",
         )
