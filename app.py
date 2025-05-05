@@ -79,28 +79,40 @@ if st.button("Predict"):
     Predict_proba = model.predict_proba(features)[:, 1][0]
     # 输出概率
     st.write(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
+    
     # 构造 DataFrame 供 SHAP 使用
     X = pd.DataFrame([feature_values], columns=feature_keys)
 
-    # 如果 model 是 Pipeline，就取出最终的树模型
+    # 如果 model 是 Pipeline，就取出实际的树模型
+    from sklearn.pipeline import Pipeline
     if isinstance(model, Pipeline):
-        # 尝试通过 named_steps 找 clf，否则取最后一步
         tree_model = model.named_steps.get('clf', model.steps[-1][1])
     else:
         tree_model = model
 
-    # 用提取出的树模型创建解释器
+    # 构造解释器并计算 SHAP 值
     explainer = shap.TreeExplainer(tree_model)
-    shap_values = explainer.shap_values(X)
+    shap_vals = explainer.shap_values(X)
 
-    # 绘制正类（索引 1）的 force plot
+    # 根据返回类型取正类的 SHAP 向量和基准值
+    if isinstance(shap_vals, list):
+        # 旧接口：list 长度=类别数，二分类时用索引1
+        vals = shap_vals[1][0]
+        base = explainer.expected_value[1]
+    else:
+        # 新接口：直接返回 (n_samples, n_features)
+        vals = shap_vals[0]
+        base = explainer.expected_value
+
+    # 绘制 force plot
     force_fig = shap.plots.force(
-        explainer.expected_value[1],  # 正类的基准值
-        shap_values[1][0],            # 样本的 SHAP 值
-        X,                            # 原始特征 DataFrame
+        base,     # 基准值
+        vals,     # 单样本的 SHAP 值向量
+        X,        # 特征 DataFrame
         matplotlib=True,
         show=False
     )
 
-    # 通过 Streamlit 显示 force plot
+    # 用 Streamlit 展示
     st.pyplot(force_fig)
+    # ---------- 在这里结束追加 SHAP 力图 ----------
