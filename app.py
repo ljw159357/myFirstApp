@@ -96,28 +96,32 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Always build TreeExplainer on **probability** scale with
-        `feature_perturbation='interventional'` to avoid the ValueError.
-        """  # <<< FIX: force TreeExplainer
         base_est = _m.steps[-1][1] if isinstance(_m, Pipeline) else _m
-        # Use a tiny background (current input) just to satisfy interventional mode
-        background = user_df_proc
+        background = user_df_proc  # minimal background for interventional mode
         return shap.TreeExplainer(
             base_est,
             data=background,
-            model_output="probability",            # <<< KEEP PROBABILITY
-            feature_perturbation="interventional", # <<< ENSURE NO ERROR
+            model_output="probability",
+            feature_perturbation="interventional",
         )
 
     explainer = build_explainer(model)
 
-    # ---------------- Compute SHAP values ----------------
+    # ---------------- Compute SHAP values safely ----------------
     shap_values = explainer.shap_values(user_df_proc)
-    # For binary classification TreeExplainer returns list [class0, class1]
-    shap_vec = shap_values[1][0]  # positive class, first sample
-    base_val = explainer.expected_value[1]
 
-    # Wrap into shap.Explanation for plotting convenience
+    # ---- Robustly pick positive‑class vector & expected value ----
+    if isinstance(shap_values, list):
+        # Binary case: list length == 2, but fallback if single
+        pos_index = 1 if len(shap_values) > 1 else 0
+        shap_vec = shap_values[pos_index][0]
+        base_val = explainer.expected_value[pos_index] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
+    else:
+        # Already ndarray shape (n_samples, n_features)
+        shap_vec = shap_values[0]
+        base_val = explainer.expected_value
+
+    # Wrap into Explanation
     instance_exp = shap.Explanation(
         values=shap_vec,
         base_values=base_val,
