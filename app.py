@@ -2,7 +2,7 @@ import streamlit as st
 import joblib
 import pandas as pd
 import shap
-import matplotlib.pyplot as plt
+from sklearn.pipeline import Pipeline
 
 # ---------------------------------------------
 # Page configuration
@@ -34,15 +34,19 @@ numerical_cols = [k for k, v in feature_defs.items() if v[0] == "numerical"]
 categorical_cols = [k for k, v in feature_defs.items() if v[0] == "categorical"]
 
 # ---------------------------------------------
-# Load model & scaler
+# Load model & (optional) external scaler
 # ---------------------------------------------
 @st.cache_resource(show_spinner=False)
 def load_assets():
     model_ = joblib.load("rf.pkl")
-    scaler_ = joblib.load("minmax_scaler.pkl")
+    # 外部 scaler 只有在模型不是 Pipeline 时才需要
+    scaler_ = None
+    if not isinstance(model_, Pipeline):
+        scaler_ = joblib.load("minmax_scaler.pkl")
     return model_, scaler_
 
-model, scaler = load_assets()
+model, external_scaler = load_assets()
+uses_pipeline = isinstance(model, Pipeline)
 
 # ---------------------------------------------
 # UI
@@ -59,37 +63,66 @@ for feat, (ftype, default) in feature_defs.items():
 user_df_raw = pd.DataFrame([user_inputs])
 
 # ---------------------------------------------
-# Pre‑processing (use *training‑time* scaler!)
-# ---------------------------------------------
-user_df = user_df_raw.copy()
-user_df[categorical_cols] = user_df[categorical_cols].replace(categorical_mapping)
-user_df[numerical_cols] = scaler.transform(user_df[numerical_cols])
+# Pre‑processing -------------------------------------------------------------
+# 如果模型本身就是 Pipeline，则交给 Pipeline 处理；
+# 否则先做映射+外部 scaler.transform。
+# ---------------------------------------------------------------------------
+if uses_pipeline:
+    user_df_proc = user_df_raw.copy()
+else:
+    user_df_proc = user_df_raw.copy()
+    user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
+    user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
 # Prediction
 # ---------------------------------------------
 if st.button("Predict"):
-    proba = model.predict_proba(user_df)[:, 1][0]
+    proba = model.predict_proba(user_df_proc)[:, 1][0]
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
     # -------- SHAP explanation --------
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(user_df)
+    # 1) 取出可被 TreeExplainer 处理的树模型；
+    # 2) 计算 shap_values，兼容 ndarray / list 两种返回格式。
+    if uses_pipeline:
+        # Pipeline: 取最后一步作为树模型
+        tree_model = model.steps[-1][1]
+    else:
+        tree_model = model
 
-    base_value = explainer.expected_value[1] if isinstance(shap_values, list) else explainer.expected_value
-    shap_vec   = shap_values[1][0]          if isinstance(shap_values, list) else shap_values[0]
+    # 对于 Pipeline，需要输入已经经过前处理的矩阵；否则直接用 user_df_proc
+    X_explain = user_df_proc
 
-    # 优先用 HTML 版本（交互效果更好）；若环境不支持再退回 matplotlib
+    try:
+        explainer = shap.TreeExplainer(tree_model)
+        shap_vals = explainer.shap_values(X_explain)
+    except Exception as e:
+        st.error(f"SHAP explanation failed: {e}")
+        st.stop()
+
+    # --- 兼容不同返回格式 ---
+    if isinstance(shap_vals, list):
+        shap_vec = shap_vals[1][0]  # 正类
+        base_val = explainer.expected_value[1]
+    else:  # ndarray
+        shap_vec = shap_vals[0]
+        # expected_value 可能是标量或长度为2的数组
+        if isinstance(explainer.expected_value, (list, tuple)):
+            base_val = explainer.expected_value[1]
+        else:
+            base_val = explainer.expected_value
+
+    # -------- Force plot：HTML 优先，matplotlib 兜底 --------
     try:
         shap_html = shap.plots.force(
-            base_value,
+            base_val,
             shap_vec,
             features=user_df_raw,
         ).html()
         st.components.v1.html(shap_html, height=300, scrolling=True)
     except Exception:
         force_fig = shap.plots.force(
-            base_value,
+            base_val,
             shap_vec,
             features=user_df_raw,
             matplotlib=True,
