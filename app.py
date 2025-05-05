@@ -1,119 +1,98 @@
 import streamlit as st
 import joblib
-import numpy as np
 import pandas as pd
 import shap
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 
-# 特征的缩写字典
-feature_abbr = {
-    "Age": "age",
-    "Postoperative platelet count (x10⁹/L)": "post_plt",
-    "Postoperative BUN (μmol/L)": "post_BUN",
-    "Day 1 postoperative antithrombin III activity (%)": "post_antithrombin_III_1",
-    "NYHA": "NYHA",
-    "HBP": "HBP",
-    "Postoperative CRRT (Continuous Renal Replacement Therapy)": "post_CRRT",
-    "Postoperative Anticoagulation": "post_anticoagulation"
+# ---------------------------------------------
+# Page configuration
+# ---------------------------------------------
+st.set_page_config(page_title="Thrombosis Prediction", layout="centered")
+
+# ---------------------------------------------
+# Feature definitions & mappings
+# ---------------------------------------------
+feature_defs = {
+    "Age": ("numerical", 0.0),
+    "Postoperative platelet count (x10⁹/L)": ("numerical", 0.0),
+    "Postoperative BUN (μmol/L)": ("numerical", 0.0),
+    "Day 1 postoperative antithrombin III activity (%)": ("numerical", 0.0),
+    "NYHA": ("categorical", ["＞2", "≤2"]),
+    "HBP": ("categorical", ["Yes", "No"]),
+    "Postoperative CRRT (Continuous Renal Replacement Therapy)": ("categorical", ["Yes", "No"]),
+    "Postoperative Anticoagulation": ("categorical", ["Yes", "No"]),
 }
 
-# 加载模型
-model = joblib.load('rf.pkl')
-scaler = StandardScaler()
-
-# 特征定义
-feature_ranges = {
-    "Age": {"type": "numerical"},
-    "Postoperative platelet count (x10⁹/L)": {"type": "numerical"},
-    "Postoperative BUN (μmol/L)": {"type": "numerical"},
-    "Day 1 postoperative antithrombin III activity (%)": {"type": "numerical"},
-    "NYHA": {"type": "categorical", "options": ["＞2", "≤2"]},
-    "HBP": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative Anticoagulation": {"type": "categorical", "options": ["Yes", "No"]}
-}
-
-category_to_numeric_mapping = {
+categorical_mapping = {
     "NYHA": {"＞2": 1, "≤2": 0},
     "HBP": {"Yes": 1, "No": 0},
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"Yes": 1, "No": 0},
-    "Postoperative Anticoagulation": {"Yes": 1, "No": 0}
+    "Postoperative Anticoagulation": {"Yes": 1, "No": 0},
 }
 
+numerical_cols = [k for k, v in feature_defs.items() if v[0] == "numerical"]
+categorical_cols = [k for k, v in feature_defs.items() if v[0] == "categorical"]
+
+# ---------------------------------------------
+# Load model & scaler
+# ---------------------------------------------
+@st.cache_resource(show_spinner=False)
+def load_assets():
+    model_ = joblib.load("rf.pkl")
+    scaler_ = joblib.load("minmax_scaler.pkl")
+    return model_, scaler_
+
+model, scaler = load_assets()
+
+# ---------------------------------------------
 # UI
-st.header("Prediction Model for Thrombosis After Lung Transplantation")
-st.write("Enter the following feature values:")
+# ---------------------------------------------
+st.title("Prediction Model for Thrombosis After Lung Transplantation")
 
-feature_values = []
-feature_keys = list(feature_ranges.keys())
+user_inputs = {}
+for feat, (ftype, default) in feature_defs.items():
+    if ftype == "numerical":
+        user_inputs[feat] = st.number_input(feat, value=float(default))
+    else:
+        user_inputs[feat] = st.selectbox(feat, default, index=0)
 
-# 输入
-for feature in feature_keys:
-    prop = feature_ranges[feature]
-    if prop["type"] == "numerical":
-        value = st.number_input(label=f"{feature}", value=0.0)
-        feature_values.append(value)
-    elif prop["type"] == "categorical":
-        value = st.selectbox(label=f"{feature} (Select a value)", options=prop["options"], index=0)
-        numeric_value = category_to_numeric_mapping[feature][value]
-        feature_values.append(numeric_value)
+user_df_raw = pd.DataFrame([user_inputs])
 
-# 数值特征标准化
-numerical_features = [f for f, p in feature_ranges.items() if p["type"] == "numerical"]
-numerical_values = [feature_values[feature_keys.index(f)] for f in numerical_features]
+# ---------------------------------------------
+# Pre‑processing (use *training‑time* scaler!)
+# ---------------------------------------------
+user_df = user_df_raw.copy()
+user_df[categorical_cols] = user_df[categorical_cols].replace(categorical_mapping)
+user_df[numerical_cols] = scaler.transform(user_df[numerical_cols])
 
-if numerical_values:
-    numerical_values_scaled = scaler.fit_transform([numerical_values])
-    for idx, f in enumerate(numerical_features):
-        feature_values[feature_keys.index(f)] = numerical_values_scaled[0][idx]
-
-features = np.array([feature_values])
-
-# 特征名缩写
-feature_keys_abbr = [feature_abbr.get(f, f) for f in feature_keys]  # 将特征名替换为缩写
-
+# ---------------------------------------------
+# Prediction
+# ---------------------------------------------
 if st.button("Predict"):
-    prediction = model.predict(features)[0]
-    Predict_proba = model.predict_proba(features)[:, 1][0]
-    # 输出概率
-    st.write(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
-    
-        # 构造 DataFrame 供 SHAP 使用
-    X = pd.DataFrame([feature_values], columns=feature_keys)
+    proba = model.predict_proba(user_df)[:, 1][0]
+    st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
-    # 取出底层树模型
-    if isinstance(model, Pipeline):
-        tree_model = model.named_steps.get('clf', model.steps[-1][1])
-    else:
-        tree_model = model
+    # -------- SHAP explanation --------
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(user_df)
 
-    # 计算 SHAP 值
-    explainer = shap.TreeExplainer(tree_model)
-    shap_vals = explainer.shap_values(X)
+    base_value = explainer.expected_value[1] if isinstance(shap_values, list) else explainer.expected_value
+    shap_vec   = shap_values[1][0]          if isinstance(shap_values, list) else shap_values[0]
 
-    # 根据返回类型区分二分类旧接口和新接口
-    if isinstance(shap_vals, list):
-        # 旧接口：list 长度=类别数，二分类取 index=1
-        base_value = explainer.expected_value[1]
-        shap_array = shap_vals[1]
-    else:
-        # 新接口：直接返回 ndarray
-        base_value = explainer.expected_value
-        shap_array = shap_vals
-
-    # 取单个样本的 SHAP 向量
-    sample_shap = shap_array[0] if shap_array.ndim > 1 else shap_array
-
-    # 调用新版 force plot：第一个参数是 base value，第二个是 shap array
-    force_fig = shap.plots.force(
-        base_value,
-        sample_shap,
-        X,
-        matplotlib=True,
-        show=False
-    )
-
-    # 在 Streamlit 中展示
-    st.pyplot(force_fig)
+    # 优先用 HTML 版本（交互效果更好）；若环境不支持再退回 matplotlib
+    try:
+        shap_html = shap.plots.force(
+            base_value,
+            shap_vec,
+            features=user_df_raw,
+        ).html()
+        st.components.v1.html(shap_html, height=300, scrolling=True)
+    except Exception:
+        force_fig = shap.plots.force(
+            base_value,
+            shap_vec,
+            features=user_df_raw,
+            matplotlib=True,
+            show=False,
+        )
+        st.pyplot(force_fig)
