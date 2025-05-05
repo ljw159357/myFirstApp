@@ -4,6 +4,7 @@ import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
+import io
 
 # ---------------------------------------------
 # Page configuration
@@ -39,8 +40,16 @@ categorical_cols = [k for k, v in feature_defs.items() if v[0] == "categorical"]
 # ---------------------------------------------
 @st.cache_resource(show_spinner=False)
 def load_assets():
+    """Load the trained model and optional scaler from disk."""
     model_ = joblib.load("rf.pkl")
-    scaler_ = None if isinstance(model_, Pipeline) else joblib.load("minmax_scaler.pkl")
+
+    # If the pickled object is **not** a Pipeline we also need a scaler
+    scaler_ = None
+    if not isinstance(model_, Pipeline):
+        try:
+            scaler_ = joblib.load("minmax_scaler.pkl")
+        except FileNotFoundError:
+            scaler_ = None
     return model_, scaler_
 
 model, external_scaler = load_assets()
@@ -65,54 +74,55 @@ user_df_raw = pd.DataFrame([user_inputs])
 # ---------------------------------------------
 user_df_proc = user_df_raw.copy()
 user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
-if not uses_pipeline:
+if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
 # Prediction & SHAP
 # ---------------------------------------------
 if st.button("Predict"):
-    # Model prediction
     proba = model.predict_proba(user_df_proc)[:, 1][0]
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
-    # -------------------------------------------------
-    # SHAP explanation (force plot)
-    # -------------------------------------------------
-    st.subheader("Model Explanation (SHAP)")
+    # ---------------- SHAP explanation ----------------
+    st.subheader("Model Explanation (SHAP Force Plot)")
 
-    # Build SHAP explainer – works for both pipelines and raw estimators
-    try:
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(user_df_proc)
-    except Exception:
-        # Fallback in case the model is a Pipeline and TreeExplainer fails
-        base_model = model.steps[-1][1] if uses_pipeline else model
-        explainer = shap.TreeExplainer(base_model)
-        shap_values = explainer.shap_values(user_df_proc if not uses_pipeline else model[:-1].transform(user_df_raw))
+    # Cache the explainer so it is built only once per session
+    @st.cache_resource(show_spinner=False)
+    def get_explainer(m):
+        # shap.Explainer automatically chooses the right algorithm and works with Pipelines
+        return shap.Explainer(m)
 
-    # For binary classification, shap_values is a list [class0, class1]
-    class_index = 1  # positive (thrombosis) class
-    expected_value = explainer.expected_value[class_index] if isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
-    shap_sample_values = shap_values[class_index][0] if isinstance(shap_values, list) else shap_values[0]
+    explainer = get_explainer(model)
 
-    # Generate force plot (static matplotlib figure)
-    shap.force_plot(expected_value, shap_sample_values, user_df_raw.iloc[0], matplotlib=True, show=False)
+    # Compute SHAP values for the single sample
+    shap_exp = explainer(user_df_proc)
+    base_value = float(shap_exp.base_values[0])
+    shap_vals = shap_exp.values[0]  # 1‑D array (n_features,)
+
+    # Create force plot (matplotlib = True returns a static figure)
+    shap.plots.force(
+        base_value,
+        shap_vals,
+        feature_names=user_df_proc.columns,
+        matplotlib=True,
+        show=False,
+    )
     fig = plt.gcf()
     st.pyplot(fig)
 
-    # Optional: offer download of the figure
+    # Optional: download button
     with st.expander("Download SHAP force plot"):
         st.download_button(
             label="Download PNG",
-            data=fig_to_png_bytes(fig),
+            data=_fig_to_png_bytes(fig),
             file_name="shap_force_plot.png",
             mime="image/png",
         )
 
-def fig_to_png_bytes(fig):
-    """Convert a Matplotlib figure to PNG bytes."""
-    import io
+
+def _fig_to_png_bytes(fig):
+    """Serialize a Matplotlib figure as PNG bytes."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
     buf.seek(0)
