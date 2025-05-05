@@ -54,7 +54,6 @@ def load_assets():
     """Load the trained model and optional scaler from disk."""
     model_ = joblib.load("rf.pkl")
 
-    # If the pickled object is **not** a Pipeline we also need a scaler
     scaler_ = None
     if not isinstance(model_, Pipeline):
         try:
@@ -89,7 +88,7 @@ if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
-# Inference & SHAP explanation
+# Inference & SHAP explanation (Waterfall)
 # ---------------------------------------------
 if st.button("Predict"):
     # ---------------- Prediction ----------------
@@ -99,47 +98,34 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(m):
-        """Return a SHAP explainer that works for both pipelines and bare models."""
         try:
             return shap.Explainer(m)
         except Exception:
-            # If the generic path fails (rare), fall back to the last estimator in Pipeline
             if isinstance(m, Pipeline):
                 return shap.TreeExplainer(m.steps[-1][1])
-            raise  # Re‑raise if it's some other unexpected error
+            raise
 
     explainer = build_explainer(model)
 
     # ---------------- Compute SHAP values ----------------
-    shap_result = explainer(user_df_proc)
+    shap_exp = explainer(user_df_proc)
 
-    # For single‑sample prediction shap_result.base_values is scalar or array‑like length 1
-    base_val = float(shap_result.base_values[0] if hasattr(shap_result.base_values, "__len__") else shap_result.base_values)
-    shap_vec = shap_result.values[0]  # 1‑D array of per‑feature contributions
+    # ---------------- Waterfall plot ----------------
+    st.subheader("Model Explanation (SHAP Waterfall Plot)")
 
-    # ---------------- Force plot ----------------
-    st.subheader("Model Explanation (SHAP Force Plot)")
-
-    # Provide raw feature values for annotation
-    feature_vals = user_df_raw.iloc[0]
-
-    # Draw static matplotlib force plot
-    shap.plots.force(
-        base_val,
-        shap_vec,
-        features=feature_vals,
-        feature_names=feature_vals.index,
-        matplotlib=True,
+    shap.plots.waterfall(
+        shap_exp[0],  # single‑sample Explanation object
+        max_display=15,
         show=False,
     )
     fig = plt.gcf()
     st.pyplot(fig)
 
     # ---------------- Download figure ----------------
-    with st.expander("Download SHAP force plot"):
+    with st.expander("Download SHAP waterfall plot"):
         st.download_button(
             label="Download PNG",
             data=_fig_to_png_bytes(fig),
-            file_name="shap_force_plot.png",
+            file_name="shap_waterfall_plot.png",
             mime="image/png",
         )
