@@ -80,34 +80,36 @@ if st.button("Predict"):
     # 输出概率
     st.write(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
     
-    # 构造 DataFrame 供 SHAP 使用
+        # 构造 DataFrame 供 SHAP 使用
     X = pd.DataFrame([feature_values], columns=feature_keys)
 
-    # 如果 model 是 Pipeline，就取出实际的树模型
+    # 取出底层树模型
     if isinstance(model, Pipeline):
         tree_model = model.named_steps.get('clf', model.steps[-1][1])
     else:
         tree_model = model
 
-    # 用 TreeExplainer 解释
+    # 计算 SHAP 值
     explainer = shap.TreeExplainer(tree_model)
     shap_vals = explainer.shap_values(X)
 
-    # 针对旧接口（list）和新接口（ndarray）分别取 base 和 vals
+    # 根据返回类型区分二分类旧接口和新接口
     if isinstance(shap_vals, list):
-        # 二分类旧接口：shap_vals[1] 是正类
-        base = explainer.expected_value[1]
-        vals = shap_vals[1][0]
+        # 旧接口：list 长度=类别数，二分类取 index=1
+        base_value = explainer.expected_value[1]
+        shap_array = shap_vals[1]
     else:
-        # 单输出新接口
-        base = explainer.expected_value
-        # 如果 shap_vals 维度是 (1, n_features)，取第一行；否则直接用 shap_vals
-        vals = shap_vals[0] if shap_vals.ndim > 1 else shap_vals
+        # 新接口：直接返回 ndarray
+        base_value = explainer.expected_value
+        shap_array = shap_vals
 
-    # 绘制 force plot（注意：base 在前，vals 在后）
+    # 取单个样本的 SHAP 向量
+    sample_shap = shap_array[0] if shap_array.ndim > 1 else shap_array
+
+    # 调用新版 force plot：第一个参数是 base value，第二个是 shap array
     force_fig = shap.plots.force(
-        base,
-        vals,
+        base_value,
+        sample_shap,
         X,
         matplotlib=True,
         show=False
