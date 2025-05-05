@@ -84,35 +84,34 @@ if st.button("Predict"):
     X = pd.DataFrame([feature_values], columns=feature_keys)
 
     # 如果 model 是 Pipeline，就取出实际的树模型
-    from sklearn.pipeline import Pipeline
     if isinstance(model, Pipeline):
         tree_model = model.named_steps.get('clf', model.steps[-1][1])
     else:
         tree_model = model
 
-    # 构造解释器并计算 SHAP 值
+    # 用 TreeExplainer 解释
     explainer = shap.TreeExplainer(tree_model)
     shap_vals = explainer.shap_values(X)
 
-    # 根据返回类型取正类的 SHAP 向量和基准值
+    # 针对旧接口（list）和新接口（ndarray）分别取 base 和 vals
     if isinstance(shap_vals, list):
-        # 旧接口：list 长度=类别数，二分类时用索引1
-        vals = shap_vals[1][0]
+        # 二分类旧接口：shap_vals[1] 是正类
         base = explainer.expected_value[1]
+        vals = shap_vals[1][0]
     else:
-        # 新接口：直接返回 (n_samples, n_features)
-        vals = shap_vals[0]
+        # 单输出新接口
         base = explainer.expected_value
+        # 如果 shap_vals 维度是 (1, n_features)，取第一行；否则直接用 shap_vals
+        vals = shap_vals[0] if shap_vals.ndim > 1 else shap_vals
 
-    # 绘制 force plot
+    # 绘制 force plot（注意：base 在前，vals 在后）
     force_fig = shap.plots.force(
-        base,     # 基准值
-        vals,     # 单样本的 SHAP 值向量
-        X,        # 特征 DataFrame
+        base,
+        vals,
+        X,
         matplotlib=True,
         show=False
     )
 
-    # 用 Streamlit 展示
+    # 在 Streamlit 中展示
     st.pyplot(force_fig)
-    # ---------- 在这里结束追加 SHAP 力图 ----------
