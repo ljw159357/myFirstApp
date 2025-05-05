@@ -46,6 +46,55 @@ def _fig_to_png_bytes(fig):
     buf.seek(0)
     return buf.read()
 
+# helper – robust waterfall plotting for old/new shap
+
+def _plot_waterfall(instance_exp, shap_vec, base_val, feat_names):
+    """Draw waterfall in both new (Explanation) & old shap versions."""
+    try:
+        # Newer shap (>=0.41) supports Explanation directly
+        shap.plots.waterfall(instance_exp, max_display=15, show=False)
+    except (TypeError, AttributeError):
+        # Older shap: retry with vector + params
+        try:
+            shap.plots.waterfall(
+                shap_vec,
+                max_display=15,
+                feature_names=feat_names,
+                base_value=base_val,
+                show=False,
+            )
+        except Exception:
+            # Final fallback: summary bar chart
+            shap.summary_plot(
+                shap_vec.reshape(1, -1),
+                features=np.array([shap_vec]),
+                feature_names=feat_names,
+                plot_type="bar",
+                show=False,
+            )
+
+# helper – robust force plotting for old/new shap
+
+def _plot_force(base_val, shap_vec, feat_vals, feat_names):
+    try:
+        shap.plots.force(
+            base_val,
+            shap_vec,
+            features=feat_vals,
+            feature_names=feat_names,
+            matplotlib=True,
+            show=False,
+        )
+    except (TypeError, AttributeError):
+        # Older shap uses force_plot
+        shap.force_plot(
+            base_val,
+            shap_vec,
+            feat_vals,
+            matplotlib=True,
+            show=False,
+        )
+
 # ---------------------------------------------
 # Load model & (optional) external scaler
 # ---------------------------------------------
@@ -97,7 +146,7 @@ if st.button("Predict"):
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
         base_est = _m.steps[-1][1] if isinstance(_m, Pipeline) else _m
-        background = user_df_proc  # minimal background for interventional mode
+        background = user_df_proc
         return shap.TreeExplainer(
             base_est,
             data=background,
@@ -110,51 +159,39 @@ if st.button("Predict"):
     # ---------------- Compute SHAP values safely ----------------
     shap_values = explainer.shap_values(user_df_proc)
 
-        # ---- Robustly pick positive‑class vector & expected value ----
+    # ---- select positive‑class contributions ----
     if isinstance(shap_values, list):
-        # TreeExplainer returns list in raw‑output mode — we requested probability, but stay safe
         pos_index = 1 if len(shap_values) > 1 else 0
-        shap_vec = shap_values[pos_index][0]  # (n_features,)
-        base_val = explainer.expected_value[pos_index] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
+        shap_vec = shap_values[pos_index][0]
+        base_val = (
+            explainer.expected_value[pos_index]
+            if isinstance(explainer.expected_value, (list, np.ndarray))
+            else explainer.expected_value
+        )
     else:
-        # ndarray shape can be (n_samples, n_features) OR (n_samples, n_features, n_outputs)
         arr = shap_values[0]
-        if arr.ndim == 2 and arr.shape[1] == 2:
-            # shape (n_features, 2) → choose positive class (index 1)
-            shap_vec = arr[:, 1]
-        elif arr.ndim == 3:
-            # shape (n_features, n_outputs, something) uncommon, pick [:,1]
-            shap_vec = arr[:, 1, ...].squeeze()
-        else:
-            shap_vec = arr  # already 1‑D
-
+        shap_vec = arr[:, 1] if (arr.ndim == 2 and arr.shape[1] == 2) else arr.flatten()
         base_val_raw = explainer.expected_value
-        if isinstance(base_val_raw, (list, np.ndarray)) and len(base_val_raw) > 1:
-            base_val = base_val_raw[1]  # positive class
-        else:
-            base_val = base_val_raw
+        base_val = base_val_raw[1] if isinstance(base_val_raw, (list, np.ndarray)) and len(base_val_raw) > 1 else base_val_raw
 
-    # Ensure we ended with a 1‑D contribution vector
     shap_vec = np.asarray(shap_vec).flatten()
 
-    # Wrap into Explanation
-    instance_exp = shap.Explanation(
-        values=shap_vec,
-        base_values=base_val,
-        data=user_df_proc.iloc[0].values,
-        feature_names=user_df_proc.columns,
-    )(
-        values=shap_vec,
-        base_values=base_val,
-        data=user_df_proc.iloc[0].values,
-        feature_names=user_df_proc.columns,
-    )
+    # Explanation for new shap (may fail on old)
+    try:
+        instance_exp = shap.Explanation(
+            values=shap_vec,
+            base_values=base_val,
+            data=user_df_proc.iloc[0].values,
+            feature_names=user_df_proc.columns,
+        )
+    except Exception:
+        instance_exp = None  # fallback path
 
     # ====================================================
-    # WATERFALL PLOT (probability scale)
+    # WATERFALL PLOT (probability scale) – compatible
     # ====================================================
     st.subheader("Model Explanation – SHAP Waterfall (Probability)")
-    shap.plots.waterfall(instance_exp, max_display=15, show=False)
+    _plot_waterfall(instance_exp, shap_vec, base_val, user_df_proc.columns)
     fig_water = plt.gcf()
     st.pyplot(fig_water)
 
@@ -167,18 +204,10 @@ if st.button("Predict"):
         )
 
     # ====================================================
-    # FORCE PLOT (probability scale)
+    # FORCE PLOT (probability scale) – compatible
     # ====================================================
     st.subheader("Model Explanation – SHAP Force (Probability)")
-
-    shap.plots.force(
-        base_val,
-        shap_vec,
-        features=user_df_proc.iloc[0],
-        feature_names=user_df_proc.columns,
-        matplotlib=True,
-        show=False,
-    )
+    _plot_force(base_val, shap_vec, user_df_proc.iloc[0], user_df_proc.columns)
     fig_force = plt.gcf()
     st.pyplot(fig_force)
 
