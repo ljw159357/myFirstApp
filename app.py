@@ -3,6 +3,7 @@ import streamlit as st
 import joblib
 import pandas as pd
 import shap
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
 
@@ -40,7 +41,6 @@ categorical_cols = [k for k, v in feature_defs.items() if v[0] == "categorical"]
 # ---------------------------------------------
 
 def _fig_to_png_bytes(fig):
-    """Serialize a Matplotlib figure as PNG bytes."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
     buf.seek(0)
@@ -51,9 +51,7 @@ def _fig_to_png_bytes(fig):
 # ---------------------------------------------
 @st.cache_resource(show_spinner=False)
 def load_assets():
-    """Load the trained model and optional scaler from disk."""
     model_ = joblib.load("rf.pkl")
-
     scaler_ = None
     if not isinstance(model_, Pipeline):
         try:
@@ -80,7 +78,7 @@ for feat, (ftype, default) in feature_defs.items():
 user_df_raw = pd.DataFrame([user_inputs])
 
 # ---------------------------------------------
-# Pre‑processing (mirror training pipeline)
+# Pre‑processing
 # ---------------------------------------------
 user_df_proc = user_df_raw.copy()
 user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
@@ -88,7 +86,7 @@ if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
-# Inference & SHAP explanation (Waterfall + Force)
+# Inference & SHAP explanation (probability scale everywhere)
 # ---------------------------------------------
 if st.button("Predict"):
     # ---------------- Prediction ----------------
@@ -98,11 +96,14 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
+        """Build explainer **on probability scale** for consistent outputs.
+        UPDATED: added `model_output='probability'` so f(x) = predicted probability.
+        """  # <<< UPDATED TO PROBABILITY SCALE
         try:
-            return shap.Explainer(_m)
+            return shap.Explainer(_m, model_output="probability")  # <<< CHANGED
         except Exception:
             if isinstance(_m, Pipeline):
-                return shap.TreeExplainer(_m.steps[-1][1])
+                return shap.TreeExplainer(_m.steps[-1][1], model_output="probability")  # <<< CHANGED
             raise
 
     explainer = build_explainer(model)
@@ -110,35 +111,35 @@ if st.button("Predict"):
     # ---------------- Compute SHAP values ----------------
     shap_exp = explainer(user_df_proc)
 
-    # ---------------- Select single‑output explanation ----------------
+    # Select explanation for positive class if multi‑output
     instance_exp = shap_exp[0]
-    if instance_exp.values.ndim == 2:  # (n_features, n_outputs)
-        instance_exp = instance_exp[:, 1]  # choose positive class by default
+    if instance_exp.values.ndim == 2:
+        instance_exp = instance_exp[:, 1]
 
     # ====================================================
-    # WATERFALL PLOT
+    # WATERFALL PLOT (probability scale)
     # ====================================================
-    st.subheader("Model Explanation – SHAP Waterfall Plot")
+    st.subheader("Model Explanation – SHAP Waterfall (Probability)")
     shap.plots.waterfall(instance_exp, max_display=15, show=False)
     fig_water = plt.gcf()
     st.pyplot(fig_water)
 
-    with st.expander("Download SHAP waterfall plot"):
+    with st.expander("Download SHAP waterfall (probability)"):
         st.download_button(
             label="Download PNG",
             data=_fig_to_png_bytes(fig_water),
-            file_name="shap_waterfall_plot.png",
+            file_name="shap_waterfall_probability.png",
             mime="image/png",
         )
 
     # ====================================================
-    # FORCE PLOT (static matplotlib)
+    # FORCE PLOT (probability scale)
     # ====================================================
-    st.subheader("Model Explanation – SHAP Force Plot")
+    st.subheader("Model Explanation – SHAP Force (Probability)")
 
-    base_val = float(instance_exp.base_values if hasattr(instance_exp.base_values, "__len__") else instance_exp.base_values)
-    shap_vec = instance_exp.values  # 1‑D contributions
-    feature_vals = instance_exp.data  # original feature values
+    base_val = float(instance_exp.base_values)
+    shap_vec = instance_exp.values
+    feature_vals = instance_exp.data
     feature_names = instance_exp.feature_names
 
     shap.plots.force(
@@ -152,10 +153,10 @@ if st.button("Predict"):
     fig_force = plt.gcf()
     st.pyplot(fig_force)
 
-    with st.expander("Download SHAP force plot"):
+    with st.expander("Download SHAP force (probability)"):
         st.download_button(
             label="Download PNG",
             data=_fig_to_png_bytes(fig_force),
-            file_name="shap_force_plot.png",
+            file_name="shap_force_probability.png",
             mime="image/png",
         )
