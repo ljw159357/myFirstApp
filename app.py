@@ -78,3 +78,21 @@ if st.button("Predict"):
     Predict_proba = model.predict_proba(features)[:, 1][0]
     # 输出概率
     st.write(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
+    # 构造 DataFrame 供 SHAP 使用（列名需与 feature_keys 对应）
+    X = pd.DataFrame([feature_values], columns=feature_keys)
+
+    # 用 TreeExplainer 解释随机森林模型
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X)
+
+    # 绘制正类（索引 1）的 force plot
+    force_fig = shap.plots.force(
+        explainer.expected_value[1],  # 正类的基准值
+        shap_values[1][0],            # 样本的 SHAP 值
+        X,                            # 原始特征 DataFrame
+        matplotlib=True,
+        show=False
+    )
+
+    # 通过 Streamlit 显示 force plot
+    st.pyplot(force_fig)
