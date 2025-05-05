@@ -86,7 +86,7 @@ if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
-# Inference & SHAP explanation (probability scale everywhere)
+# Inference & SHAP explanation (probability scale)
 # ---------------------------------------------
 if st.button("Predict"):
     # ---------------- Prediction ----------------
@@ -96,34 +96,34 @@ if st.button("Predict"):
     # ---------------- Build SHAP explainer ----------------
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Build explainer on **probability** scale.
-        For tree models this requires `feature_perturbation='interventional'`.
-        """  # <<< UPDATED TO FIX ValueError
-        try:
-            # Use generic wrapper first — pass extra arg for trees
-            return shap.Explainer(
-                _m,
-                model_output="probability",               # <<< CHANGED
-                feature_perturbation="interventional",    # <<< ADDED
-            )
-        except Exception:
-            # Fallback: explicitly build TreeExplainer on the final estimator
-            base_est = _m.steps[-1][1] if isinstance(_m, Pipeline) else _m
-            return shap.TreeExplainer(
-                base_est,
-                model_output="probability",               # <<< CHANGED
-                feature_perturbation="interventional",    # <<< ADDED
-            )
+        """Always build TreeExplainer on **probability** scale with
+        `feature_perturbation='interventional'` to avoid the ValueError.
+        """  # <<< FIX: force TreeExplainer
+        base_est = _m.steps[-1][1] if isinstance(_m, Pipeline) else _m
+        # Use a tiny background (current input) just to satisfy interventional mode
+        background = user_df_proc
+        return shap.TreeExplainer(
+            base_est,
+            data=background,
+            model_output="probability",            # <<< KEEP PROBABILITY
+            feature_perturbation="interventional", # <<< ENSURE NO ERROR
+        )
 
     explainer = build_explainer(model)
 
     # ---------------- Compute SHAP values ----------------
-    shap_exp = explainer(user_df_proc)
+    shap_values = explainer.shap_values(user_df_proc)
+    # For binary classification TreeExplainer returns list [class0, class1]
+    shap_vec = shap_values[1][0]  # positive class, first sample
+    base_val = explainer.expected_value[1]
 
-    # Select explanation for positive class if multi‑output
-    instance_exp = shap_exp[0]
-    if instance_exp.values.ndim == 2:
-        instance_exp = instance_exp[:, 1]
+    # Wrap into shap.Explanation for plotting convenience
+    instance_exp = shap.Explanation(
+        values=shap_vec,
+        base_values=base_val,
+        data=user_df_proc.iloc[0].values,
+        feature_names=user_df_proc.columns,
+    )
 
     # ====================================================
     # WATERFALL PLOT (probability scale)
@@ -146,16 +146,11 @@ if st.button("Predict"):
     # ====================================================
     st.subheader("Model Explanation – SHAP Force (Probability)")
 
-    base_val = float(instance_exp.base_values)
-    shap_vec = instance_exp.values
-    feature_vals = instance_exp.data
-    feature_names = instance_exp.feature_names
-
     shap.plots.force(
         base_val,
         shap_vec,
-        features=feature_vals,
-        feature_names=feature_names,
+        features=user_df_proc.iloc[0],
+        feature_names=user_df_proc.columns,
         matplotlib=True,
         show=False,
     )
