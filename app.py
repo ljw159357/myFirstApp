@@ -75,36 +75,18 @@ if st.button("Predict"):
     proba = model.predict_proba(user_df_proc)[:, 1][0]
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
-    # -------- SHAP TreeExplainer --------
-    tree_model = model.steps[-1][1] if uses_pipeline else model
-    explainer  = shap.TreeExplainer(tree_model)
-    shap_vals  = explainer.shap_values(user_df_proc)
+    # 计算 SHAP 值
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_ranges.keys()))
 
-    # 针对二分类：取正类 (=1)
-    if isinstance(shap_vals, list):
-        shap_vec = shap_vals[1][0]
-        base_val = explainer.expected_value[1]
-    else:  # ndarray
-        shap_vec = shap_vals[0]
-        base_val = explainer.expected_value[1] if hasattr(explainer, "expected_value") and isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
-
-    # -------- 绘制 SHAP 力图 (matplotlib) --------
-    if isinstance(shap_vals, list):
-        shap_array = shap_vals[1]              # (n_samples, n_features)
-        base_val   = explainer.expected_value[1]
-    else:
-        shap_array = shap_vals                 # ndarray (n_samples, n_features)
-        base_val   = explainer.expected_value[1] if isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
-
-    try:
-        plt.clf()
-        force_fig = shap.force_plot(
-            base_val,
-            shap_array[0],                 # 单样本 SHAP 向量
-            features=user_df_raw.iloc[0],  # 用动态输入原值作特征
-            matplotlib=True,
-            show=False,
-        )
-        st.pyplot(force_fig)
-    except Exception as e:
-        st.error(f"SHAP force plot failed: {e}. 请确认 SHAP ≥0.20 且特征维度一致。")
+    # 生成 SHAP 力图
+    class_index = predicted_class  # 当前预测类别
+    shap_fig = shap.force_plot(
+        explainer.expected_value[class_index],
+        shap_values[:,:,class_index],
+        pd.DataFrame([feature_values], columns=feature_ranges.keys()),
+        matplotlib=True,
+    )
+    # 保存并显示 SHAP 图
+    plt.savefig("shap_force_plot.png", bbox_inches='tight', dpi=1200)
+    st.image("shap_force_plot.png")
