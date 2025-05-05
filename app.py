@@ -90,11 +90,12 @@ if st.button("Predict"):
 
     # -------- 绘制 SHAP 力图 (matplotlib) --------
     plt.clf()
+    # SHAP 0.20+ 要求: base_value 第 1 位, shap_vals 第 2 位, 其余关键字
     shap.force_plot(
         base_val,
         shap_vec,
-        user_df_raw,  # 用原始值展示，含中文/字符串，不影响绘图
+        features=user_df_raw,
         matplotlib=True,
         show=False,
     )
-    st.pyplot(bbox_inches='tight')
+    st.pyplot(bbox_inches="tight")
