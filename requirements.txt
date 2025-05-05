@@ -1,0 +1,6 @@
+scikit-learn==1.2.2
+joblib==1.4.2
+shap==0.47.0
+numpy==1.26.4
+matplotlib==3.10.0
+ipython>=7.0.0
