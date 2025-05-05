@@ -1,10 +1,10 @@
+import io
 import streamlit as st
 import joblib
 import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
-import io
 
 # ---------------------------------------------
 # Page configuration
@@ -36,6 +36,17 @@ numerical_cols = [k for k, v in feature_defs.items() if v[0] == "numerical"]
 categorical_cols = [k for k, v in feature_defs.items() if v[0] == "categorical"]
 
 # ---------------------------------------------
+# Utility
+# ---------------------------------------------
+
+def _fig_to_png_bytes(fig):
+    """Serialize a Matplotlib figure as PNG bytes."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
+    buf.seek(0)
+    return buf.read()
+
+# ---------------------------------------------
 # Load model & (optional) external scaler
 # ---------------------------------------------
 @st.cache_resource(show_spinner=False)
@@ -49,14 +60,14 @@ def load_assets():
         try:
             scaler_ = joblib.load("minmax_scaler.pkl")
         except FileNotFoundError:
-            scaler_ = None
+            pass
     return model_, scaler_
 
 model, external_scaler = load_assets()
 uses_pipeline = isinstance(model, Pipeline)
 
 # ---------------------------------------------
-# UI
+# UI – feature input
 # ---------------------------------------------
 st.title("Prediction Model for Thrombosis After Lung Transplantation")
 
@@ -70,7 +81,7 @@ for feat, (ftype, default) in feature_defs.items():
 user_df_raw = pd.DataFrame([user_inputs])
 
 # ---------------------------------------------
-# Pre‑processing
+# Pre‑processing (mirror training pipeline)
 # ---------------------------------------------
 user_df_proc = user_df_raw.copy()
 user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
@@ -78,40 +89,53 @@ if (external_scaler is not None) and (not uses_pipeline):
     user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
 # ---------------------------------------------
-# Prediction & SHAP
+# Inference & SHAP explanation
 # ---------------------------------------------
 if st.button("Predict"):
+    # ---------------- Prediction ----------------
     proba = model.predict_proba(user_df_proc)[:, 1][0]
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
-    # ---------------- SHAP explanation ----------------
+    # ---------------- Build SHAP explainer ----------------
+    @st.cache_resource(show_spinner=False)
+    def build_explainer(m):
+        """Return a SHAP explainer that works for both pipelines and bare models."""
+        try:
+            return shap.Explainer(m)
+        except Exception:
+            # If the generic path fails (rare), fall back to the last estimator in Pipeline
+            if isinstance(m, Pipeline):
+                return shap.TreeExplainer(m.steps[-1][1])
+            raise  # Re‑raise if it's some other unexpected error
+
+    explainer = build_explainer(model)
+
+    # ---------------- Compute SHAP values ----------------
+    shap_result = explainer(user_df_proc)
+
+    # For single‑sample prediction shap_result.base_values is scalar or array‑like length 1
+    base_val = float(shap_result.base_values[0] if hasattr(shap_result.base_values, "__len__") else shap_result.base_values)
+    shap_vec = shap_result.values[0]  # 1‑D array of per‑feature contributions
+
+    # ---------------- Force plot ----------------
     st.subheader("Model Explanation (SHAP Force Plot)")
 
-    # Cache the explainer so it is built only once per session
-    @st.cache_resource(show_spinner=False)
-    def get_explainer(m):
-        # shap.Explainer automatically chooses the right algorithm and works with Pipelines
-        return shap.Explainer(m)
+    # Provide raw feature values for annotation
+    feature_vals = user_df_raw.iloc[0]
 
-    explainer = get_explainer(model)
-
-    # Compute SHAP values for the single sample
-    shap_exp = explainer(user_df_proc)
-    base_value = float(shap_exp.base_values[0])
-    shap_vals = shap_exp.values[0]  # 1‑D array (n_features,)
-
-    # Create force plot (matplotlib = True returns a static figure)
+    # Draw static matplotlib force plot
     shap.plots.force(
-        base_value,
-        shap_vals,
-        feature_names=user_df_proc.columns,
+        base_val,
+        shap_vec,
+        features=feature_vals,
+        feature_names=feature_vals.index,
         matplotlib=True,
         show=False,
     )
     fig = plt.gcf()
     st.pyplot(fig)
 
-    # Optional: download button
+    # ---------------- Download figure ----------------
     with st.expander("Download SHAP force plot"):
         st.download_button(
             label="Download PNG",
@@ -119,11 +143,3 @@ if st.button("Predict"):
             file_name="shap_force_plot.png",
             mime="image/png",
         )
-
-
-def _fig_to_png_bytes(fig):
-    """Serialize a Matplotlib figure as PNG bytes."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
-    buf.seek(0)
-    return buf.read()
