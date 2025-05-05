@@ -100,11 +100,11 @@ if st.button("Predict"):
         plt.clf()
         force_fig = shap.force_plot(
             base_val,
-            shap_array[0],                     # 取首样本 SHAP 向量
-            features=user_df_raw.iloc[0],               # 特征原值 (Series)
+            shap_array[0],                 # 单样本 SHAP 向量
+            features=user_df_raw.iloc[0],  # 用动态输入原值作特征
             matplotlib=True,
             show=False,
         )
         st.pyplot(force_fig)
     except Exception as e:
-        st.error(f"SHAP force plot failed: {e}")
+        st.error(f"SHAP force plot failed: {e}. 请确认 SHAP ≥0.20 且特征维度一致。")
