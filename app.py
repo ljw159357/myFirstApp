@@ -5,6 +5,7 @@ import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
 # 特征的缩写字典
 feature_abbr = {
@@ -78,11 +79,18 @@ if st.button("Predict"):
     Predict_proba = model.predict_proba(features)[:, 1][0]
     # 输出概率
     st.write(f"Based on feature values, predicted possibility of thrombosis after lung transplantation is :  {'%.2f' % float(Predict_proba * 100) + '%'}")
-    # 构造 DataFrame 供 SHAP 使用（列名需与 feature_keys 对应）
+    # 构造 DataFrame 供 SHAP 使用
     X = pd.DataFrame([feature_values], columns=feature_keys)
 
-    # 用 TreeExplainer 解释随机森林模型
-    explainer = shap.TreeExplainer(model)
+    # 如果 model 是 Pipeline，就取出最终的树模型
+    if isinstance(model, Pipeline):
+        # 尝试通过 named_steps 找 clf，否则取最后一步
+        tree_model = model.named_steps.get('clf', model.steps[-1][1])
+    else:
+        tree_model = model
+
+    # 用提取出的树模型创建解释器
+    explainer = shap.TreeExplainer(tree_model)
     shap_values = explainer.shap_values(X)
 
     # 绘制正类（索引 1）的 force plot
