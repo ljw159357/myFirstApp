@@ -89,11 +89,19 @@ if st.button("Predict"):
         base_val = explainer.expected_value[1] if hasattr(explainer, "expected_value") and isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
 
     # -------- 绘制 SHAP 力图 (matplotlib) --------
+    if isinstance(shap_vals, list):
+        shap_array = shap_vals[1]              # (n_samples, n_features)
+        base_val   = explainer.expected_value[1]
+    else:
+        shap_array = shap_vals                 # ndarray (n_samples, n_features)
+        base_val   = explainer.expected_value[1] if isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
+
     try:
-        force_fig = shap.plots.force(
+        plt.clf()
+        force_fig = shap.force_plot(
             base_val,
-            shap_vec,
-            features=user_df_raw.iloc[0],  # 单样本特征 Series
+            shap_array[0],                     # 取首样本 SHAP 向量
+            user_df_raw.iloc[0],               # 特征原值 (Series)
             matplotlib=True,
             show=False,
         )
