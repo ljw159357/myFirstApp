@@ -96,12 +96,8 @@ if st.button("Predict"):
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
     # ---------------- Build SHAP explainer ----------------
-    # NOTE: `_m` starts with underscore so Streamlit ignores it when hashing
     @st.cache_resource(show_spinner=False)
     def build_explainer(_m):
-        """Return a SHAP explainer that works for both pipelines and bare models.
-        The leading underscore prevents Streamlit from trying to hash the model object.
-        """
         try:
             return shap.Explainer(_m)
         except Exception:
@@ -117,8 +113,14 @@ if st.button("Predict"):
     # ---------------- Waterfall plot ----------------
     st.subheader("Model Explanation (SHAP Waterfall Plot)")
 
+    # Handle multi-output (e.g., binary class probs) -> pick positive‑class (index 1) contributions
+    instance_exp = shap_exp[0]
+    if instance_exp.values.ndim == 2:  # shape (n_features, n_outputs)
+        # Choose class 1 (thrombosis) by default; adjust if needed
+        instance_exp = instance_exp[:, 1]
+
     shap.plots.waterfall(
-        shap_exp[0],  # single‑sample Explanation object
+        instance_exp,
         max_display=15,
         show=False,
     )
