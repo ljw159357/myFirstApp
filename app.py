@@ -72,21 +72,48 @@ if not uses_pipeline:
 # Prediction & SHAP
 # ---------------------------------------------
 if st.button("Predict"):
+    # Model prediction
     proba = model.predict_proba(user_df_proc)[:, 1][0]
     st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
-    # 计算 SHAP 值
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_ranges.keys()))
+    # -------------------------------------------------
+    # SHAP explanation (force plot)
+    # -------------------------------------------------
+    st.subheader("Model Explanation (SHAP)")
 
-    # 生成 SHAP 力图
-    class_index = predicted_class  # 当前预测类别
-    shap_fig = shap.force_plot(
-        explainer.expected_value[class_index],
-        shap_values[:,:,class_index],
-        pd.DataFrame([feature_values], columns=feature_ranges.keys()),
-        matplotlib=True,
-    )
-    # 保存并显示 SHAP 图
-    plt.savefig("shap_force_plot.png", bbox_inches='tight', dpi=1200)
-    st.image("shap_force_plot.png")
+    # Build SHAP explainer – works for both pipelines and raw estimators
+    try:
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(user_df_proc)
+    except Exception:
+        # Fallback in case the model is a Pipeline and TreeExplainer fails
+        base_model = model.steps[-1][1] if uses_pipeline else model
+        explainer = shap.TreeExplainer(base_model)
+        shap_values = explainer.shap_values(user_df_proc if not uses_pipeline else model[:-1].transform(user_df_raw))
+
+    # For binary classification, shap_values is a list [class0, class1]
+    class_index = 1  # positive (thrombosis) class
+    expected_value = explainer.expected_value[class_index] if isinstance(explainer.expected_value, (list, tuple)) else explainer.expected_value
+    shap_sample_values = shap_values[class_index][0] if isinstance(shap_values, list) else shap_values[0]
+
+    # Generate force plot (static matplotlib figure)
+    shap.force_plot(expected_value, shap_sample_values, user_df_raw.iloc[0], matplotlib=True, show=False)
+    fig = plt.gcf()
+    st.pyplot(fig)
+
+    # Optional: offer download of the figure
+    with st.expander("Download SHAP force plot"):
+        st.download_button(
+            label="Download PNG",
+            data=fig_to_png_bytes(fig),
+            file_name="shap_force_plot.png",
+            mime="image/png",
+        )
+
+def fig_to_png_bytes(fig):
+    """Convert a Matplotlib figure to PNG bytes."""
+    import io
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
+    buf.seek(0)
+    return buf.read()
