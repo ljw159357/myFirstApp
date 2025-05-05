@@ -1,110 +1,161 @@
+import io
 import streamlit as st
 import joblib
-import numpy as np
 import pandas as pd
 import shap
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
-# 特征的缩写字典
-feature_abbr = {
-    "Age": "age",
-    "Postoperative platelet count (x10⁹/L)": "post_plt",
-    "Postoperative BUN (μmol/L)": "post_BUN",
-    "Day 1 postoperative antithrombin III activity (%)": "post_antithrombin_III_1",
-    "NYHA": "NYHA",
-    "HBP": "HBP",
-    "Postoperative CRRT (Continuous Renal Replacement Therapy)": "post_CRRT",
-    "Postoperative Anticoagulation": "post_anticoagulation"
+# ---------------------------------------------
+# Page configuration
+# ---------------------------------------------
+st.set_page_config(page_title="Thrombosis Prediction", layout="centered")
+
+# ---------------------------------------------
+# Feature definitions & mappings
+# ---------------------------------------------
+feature_defs = {
+    "Age": ("numerical", 0.0),
+    "Postoperative platelet count (x10⁹/L)": ("numerical", 0.0),
+    "Postoperative BUN (μmol/L)": ("numerical", 0.0),
+    "Day 1 postoperative antithrombin III activity (%)": ("numerical", 0.0),
+    "NYHA": ("categorical", ["＞2", "≤2"]),
+    "HBP": ("categorical", ["Yes", "No"]),
+    "Postoperative CRRT (Continuous Renal Replacement Therapy)": ("categorical", ["Yes", "No"]),
+    "Postoperative Anticoagulation": ("categorical", ["Yes", "No"]),
 }
 
-# 加载模型
-model = joblib.load('rf.pkl')
-scaler = StandardScaler()
-
-# 特征定义
-feature_ranges = {
-    "Age": {"type": "numerical"},
-    "Postoperative platelet count (x10⁹/L)": {"type": "numerical"},
-    "Postoperative BUN (μmol/L)": {"type": "numerical"},
-    "Day 1 postoperative antithrombin III activity (%)": {"type": "numerical"},
-    "NYHA": {"type": "categorical", "options": ["＞2", "≤2"]},
-    "HBP": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"type": "categorical", "options": ["Yes", "No"]},
-    "Postoperative Anticoagulation": {"type": "categorical", "options": ["Yes", "No"]}
-}
-
-category_to_numeric_mapping = {
+categorical_mapping = {
     "NYHA": {"＞2": 1, "≤2": 0},
     "HBP": {"Yes": 1, "No": 0},
     "Postoperative CRRT (Continuous Renal Replacement Therapy)": {"Yes": 1, "No": 0},
-    "Postoperative Anticoagulation": {"Yes": 1, "No": 0}
+    "Postoperative Anticoagulation": {"Yes": 1, "No": 0},
 }
 
-# UI
+numerical_cols = [k for k, v in feature_defs.items() if v[0] == "numerical"]
+categorical_cols = [k for k, v in feature_defs.items() if v[0] == "categorical"]
+
+# ---------------------------------------------
+# Utility
+# ---------------------------------------------
+
+def _fig_to_png_bytes(fig):
+    """Serialize a Matplotlib figure as PNG bytes."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
+    buf.seek(0)
+    return buf.read()
+
+# ---------------------------------------------
+# Load model & (optional) external scaler
+# ---------------------------------------------
+@st.cache_resource(show_spinner=False)
+def load_assets():
+    """Load the trained model and optional scaler from disk."""
+    model_ = joblib.load("rf.pkl")
+
+    scaler_ = None
+    if not isinstance(model_, Pipeline):
+        try:
+            scaler_ = joblib.load("minmax_scaler.pkl")
+        except FileNotFoundError:
+            pass
+    return model_, scaler_
+
+model, external_scaler = load_assets()
+uses_pipeline = isinstance(model, Pipeline)
+
+# ---------------------------------------------
+# UI – feature input
+# ---------------------------------------------
 st.title("Prediction Model for Thrombosis After Lung Transplantation")
-st.header("Enter the following feature values:")
 
-feature_values = []
-feature_keys = list(feature_ranges.keys())
+user_inputs = {}
+for feat, (ftype, default) in feature_defs.items():
+    if ftype == "numerical":
+        user_inputs[feat] = st.number_input(feat, value=float(default))
+    else:
+        user_inputs[feat] = st.selectbox(feat, feature_defs[feat][1], index=0)
 
-# 输入
-for feature in feature_keys:
-    prop = feature_ranges[feature]
-    if prop["type"] == "numerical":
-        value = st.number_input(label=f"{feature}", value=0.0)
-        feature_values.append(value)
-    elif prop["type"] == "categorical":
-        value = st.selectbox(label=f"{feature} (Select a value)", options=prop["options"], index=0)
-        numeric_value = category_to_numeric_mapping[feature][value]
-        feature_values.append(numeric_value)
+user_df_raw = pd.DataFrame([user_inputs])
 
-# 数值特征标准化
-numerical_features = [f for f, p in feature_ranges.items() if p["type"] == "numerical"]
-numerical_values = [feature_values[feature_keys.index(f)] for f in numerical_features]
+# ---------------------------------------------
+# Pre‑processing (mirror training pipeline)
+# ---------------------------------------------
+user_df_proc = user_df_raw.copy()
+user_df_proc[categorical_cols] = user_df_proc[categorical_cols].replace(categorical_mapping)
+if (external_scaler is not None) and (not uses_pipeline):
+    user_df_proc[numerical_cols] = external_scaler.transform(user_df_proc[numerical_cols])
 
-if numerical_values:
-    numerical_values_scaled = scaler.fit_transform([numerical_values])
-    for idx, f in enumerate(numerical_features):
-        feature_values[feature_keys.index(f)] = numerical_values_scaled[0][idx]
-
-features = np.array([feature_values])
-
-# 特征名缩写
-feature_keys_abbr = [feature_abbr.get(f, f) for f in feature_keys]  # 将特征名替换为缩写
-
+# ---------------------------------------------
+# Inference & SHAP explanation (Waterfall + Force)
+# ---------------------------------------------
 if st.button("Predict"):
-    predicted_class = model.predict(features)[0]
-    predicted_proba = model.predict_proba(features)[0]
-    probability = predicted_proba[predicted_class] * 100
+    # ---------------- Prediction ----------------
+    proba = model.predict_proba(user_df_proc)[:, 1][0]
+    st.success(f"Predicted risk of postoperative thrombosis: {proba * 100:.2f}%")
 
-    # 显示预测结果
-    text = f"Based on feature values, predicted possibility of thrombosis after lung transplantation is {probability:.2f}%"
-    fig, ax = plt.subplots(figsize=(8, 1))
-    ax.text(0.5, 0.5, text, fontsize=16, ha='center', va='center', fontname='Times New Roman', transform=ax.transAxes)
-    ax.axis('off')
-    plt.savefig("prediction_text.png", bbox_inches='tight', dpi=300)
-    st.image("prediction_text.png")
+    # ---------------- Build SHAP explainer ----------------
+    @st.cache_resource(show_spinner=False)
+    def build_explainer(_m):
+        try:
+            return shap.Explainer(_m)
+        except Exception:
+            if isinstance(_m, Pipeline):
+                return shap.TreeExplainer(_m.steps[-1][1])
+            raise
 
-    # SHAP 解释
-    # 提取底层模型（支持 pipeline 或直接模型）
-    def get_tree_model(model):
-        from sklearn.pipeline import Pipeline
-        if isinstance(model, Pipeline):
-            return model.named_steps['clf']
-        return model
+    explainer = build_explainer(model)
 
-    tree_model = get_tree_model(model)
-    explainer = shap.TreeExplainer(tree_model)
-    shap_values = explainer.shap_values(pd.DataFrame([feature_values], columns=feature_keys))
+    # ---------------- Compute SHAP values ----------------
+    shap_exp = explainer(user_df_proc)
 
-    shap.initjs()
-    shap_fig = shap.plots.force(
-        explainer.expected_value[1],  # 类别 1 的基准值
-        shap_values[0, :, 1],  # 类别 1 的 SHAP 值
-        pd.DataFrame([feature_values], columns=feature_keys_abbr),  # 使用缩写作为列名
+    # ---------------- Select single‑output explanation ----------------
+    instance_exp = shap_exp[0]
+    if instance_exp.values.ndim == 2:  # (n_features, n_outputs)
+        instance_exp = instance_exp[:, 1]  # choose positive class by default
+
+    # ====================================================
+    # WATERFALL PLOT
+    # ====================================================
+    st.subheader("Model Explanation – SHAP Waterfall Plot")
+    shap.plots.waterfall(instance_exp, max_display=15, show=False)
+    fig_water = plt.gcf()
+    st.pyplot(fig_water)
+
+    with st.expander("Download SHAP waterfall plot"):
+        st.download_button(
+            label="Download PNG",
+            data=_fig_to_png_bytes(fig_water),
+            file_name="shap_waterfall_plot.png",
+            mime="image/png",
+        )
+
+    # ====================================================
+    # FORCE PLOT (static matplotlib)
+    # ====================================================
+    st.subheader("Model Explanation – SHAP Force Plot")
+
+    base_val = float(instance_exp.base_values if hasattr(instance_exp.base_values, "__len__") else instance_exp.base_values)
+    shap_vec = instance_exp.values  # 1‑D contributions
+    feature_vals = instance_exp.data  # original feature values
+    feature_names = instance_exp.feature_names
+
+    shap.plots.force(
+        base_val,
+        shap_vec,
+        features=feature_vals,
+        feature_names=feature_names,
         matplotlib=True,
-        show=False  # 不自动显示图形
+        show=False,
     )
+    fig_force = plt.gcf()
+    st.pyplot(fig_force)
 
-    st.pyplot(shap_fig)
+    with st.expander("Download SHAP force plot"):
+        st.download_button(
+            label="Download PNG",
+            data=_fig_to_png_bytes(fig_force),
+            file_name="shap_force_plot.png",
+            mime="image/png",
+        )
