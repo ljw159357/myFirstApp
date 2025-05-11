@@ -9,7 +9,7 @@ from sklearn.pipeline import Pipeline
 # ---------------------------------------------
 # Page configuration
 # ---------------------------------------------
-st.set_page_config(page_title="Thrombosis Prediction", layout="centered")
+st.set_page_config(page_title="Thrombosis Risk Prediction", layout="centered")
 
 # ---------------------------------------------
 # Feature definitions & mappings
